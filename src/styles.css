@@ -8,13 +8,17 @@
   --color-line: #d0dcdc;
   --color-primary: #0f5f5c;
   --color-on-primary: #f4fbfa;
-  --color-copper: #b85a32;
+  --color-copper: #e06a2c;
   --color-danger: #8f2d2d;
   --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 
 @layer base {
+  :root,
+  :host {
+    --color-copper: #e06a2c;
+  }
   html {
     color-scheme: light;
   }

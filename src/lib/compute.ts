@@ -28,17 +28,28 @@ export function irBaseline(
   const w2 = Math.max(pair.ir1, pair.ir2);
   const y1 = meanWindow(spec.wn, spec.abs, w1, IR_HALF);
   const y2 = meanWindow(spec.wn, spec.abs, w2, IR_HALF);
-  const xs = [w1];
-  const ys = [y1];
   const knots = [...pair.knots].sort((a, b) => a.wn - b.wn);
-  for (const k of knots) {
-    if (k.wn > w1 + 0.05 && k.wn < w2 - 0.05) {
-      xs.push(k.wn);
-      ys.push(k.abs);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const push = (x: number, y: number) => {
+    if (xs.length && Math.abs(xs[xs.length - 1] - x) < 0.05) {
+      ys[ys.length - 1] = y;
+      return;
     }
+    xs.push(x);
+    ys.push(y);
+  };
+  for (const k of knots) {
+    if (k.wn < w1 - 0.05) push(k.wn, k.abs);
   }
-  xs.push(w2);
-  ys.push(y2);
+  push(w1, y1);
+  for (const k of knots) {
+    if (k.wn > w1 + 0.05 && k.wn < w2 - 0.05) push(k.wn, k.abs);
+  }
+  push(w2, y2);
+  for (const k of knots) {
+    if (k.wn > w2 + 0.05) push(k.wn, k.abs);
+  }
   return { fn: createSpline(xs, ys), y1, y2 };
 }
 

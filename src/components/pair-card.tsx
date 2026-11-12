@@ -58,12 +58,14 @@ export function PairCard({
   );
   const spline = useMemo(() => {
     if (!spectrum || !pair.irCorrect) return null;
-    return splineSamples(
-      irBaseline(spectrum, pair).fn,
-      Math.min(pair.ir1, pair.ir2),
-      Math.max(pair.ir1, pair.ir2),
-      100,
-    );
+    const base = irBaseline(spectrum, pair);
+    let a = Math.min(pair.ir1, pair.ir2);
+    let b = Math.max(pair.ir1, pair.ir2);
+    for (const k of pair.knots) {
+      if (k.wn < a) a = k.wn;
+      if (k.wn > b) b = k.wn;
+    }
+    return splineSamples(base.fn, a, b, 140);
   }, [spectrum, pair]);
 
   const qmsLines: ChartLine[] = [];
@@ -258,9 +260,9 @@ export function PairCard({
               disabled || !pair.irCorrect
                 ? undefined
                 : (id, x, y) => {
-                    const lo = Math.min(pair.ir1, pair.ir2);
-                    const hi = Math.max(pair.ir1, pair.ir2);
-                    const wn = Math.min(hi - 0.05, Math.max(lo + 0.05, x));
+                    const lo = Math.min(wnMin, wnMax);
+                    const hi = Math.max(wnMin, wnMax);
+                    const wn = Math.min(hi, Math.max(lo, x));
                     onPatch({ knots: pair.knots.map((k) => (k.id === id ? { ...k, wn, abs: y } : k)) }, true);
                   }
             }
@@ -269,9 +271,9 @@ export function PairCard({
               disabled
                 ? undefined
                 : (x, y) => {
-                    const lo = Math.min(pair.ir1, pair.ir2);
-                    const hi = Math.max(pair.ir1, pair.ir2);
-                    if (x <= lo || x >= hi) return;
+                    const lo = Math.min(wnMin, wnMax);
+                    const hi = Math.max(wnMin, wnMax);
+                    if (x < lo || x > hi) return;
                     onPatch({ knots: [...pair.knots, { id: newId(), wn: x, abs: y }] }, true);
                   }
             }
@@ -282,8 +284,8 @@ export function PairCard({
             resetToken={pair.id + "-ir"}
           />
           <p className="hint-inline">
-            Вертикальные границы ν — края окна интегрирования. Левый щелчок ставит точку, правый снимает ближайшую.
-            Магнит усредняет ординату в ±2 см⁻¹.
+            Вертикальные границы ν — края окна интегрирования. Опорные точки базовой линии можно ставить и вне них.
+            Левый щелчок ставит точку, правый снимает ближайшую. Магнит усредняет ординату в ±2 см⁻¹.
           </p>
         </div>
       </div>

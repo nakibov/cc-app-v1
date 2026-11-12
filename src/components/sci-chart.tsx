@@ -417,7 +417,7 @@ export function SciChart({
                   y={M.t}
                   width={Math.max(1, xb - xa)}
                   height={plotH}
-                  fill="var(--color-copper)"
+                  fill="var(--color-copper, #e06a2c)"
                   opacity={0.13}
                 />
                 <text x={(xa + xb) / 2} y={M.t + 14} textAnchor="middle" className="region-label">
@@ -432,7 +432,7 @@ export function SciChart({
               y={M.t}
               width={Math.max(1, Math.abs(X(span[1]) - X(span[0])))}
               height={plotH}
-              fill="var(--color-copper)"
+              fill="var(--color-copper, #e06a2c)"
               opacity={0.18}
             />
           ) : null}
@@ -449,7 +449,7 @@ export function SciChart({
             />
           ) : null}
           {curvePath ? (
-            <path d={curvePath} fill="none" stroke="var(--color-copper)" strokeWidth={1.75} />
+            <path d={curvePath} fill="none" stroke="var(--color-copper, #e06a2c)" strokeWidth={1.75} />
           ) : null}
           {seriesPath ? (
             <path d={seriesPath} fill="none" stroke="var(--color-ink)" strokeWidth={1.4} />
@@ -491,13 +491,13 @@ export function SciChart({
               x2={X(guideX)}
               y1={M.t}
               y2={M.t + plotH}
-              stroke="var(--color-copper)"
+              stroke="var(--color-copper, #e06a2c)"
               strokeDasharray="4 3"
             />
           ) : null}
           {knots.map((k) => (
             <g key={k.id}>
-              <circle cx={X(k.x)} cy={Y(k.y)} r={5} fill="var(--color-surface)" stroke="var(--color-copper)" strokeWidth={2} />
+              <circle cx={X(k.x)} cy={Y(k.y)} r={5} fill="var(--color-surface)" stroke="var(--color-copper, #e06a2c)" strokeWidth={2} />
               {k.label ? (
                 <text x={X(k.x) + 7} y={Y(k.y) - 7} className="region-label">
                   {k.label}
