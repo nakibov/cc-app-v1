@@ -65,6 +65,9 @@ export type PairResult = {
 };
 
 export type CalibPoint = {
+  id?: string;
+  pairId?: string;
+  manual?: boolean;
   spectrum: string;
   meanI: number;
   rate: number;

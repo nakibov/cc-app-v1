@@ -144,7 +144,12 @@ export function fmtExp(v: number, digits = 3): string {
 }
 
 export function parseSci(raw: string): number | null {
-  const t = raw.trim().replace(/\s/g, "").replace(",", ".");
+  const t = raw
+    .trim()
+    .replace(/\s/g, "")
+    .replace(/,/g, ".")
+    .replace(/[еЕ]/g, "e")
+    .replace(/[−–—]/g, "-");
   if (!t) return null;
   const v = Number(t);
   return Number.isFinite(v) ? v : null;

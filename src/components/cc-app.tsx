@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FolderOpen, RotateCcw, Save, Undo2 } from "lucide-react";
+import { FolderOpen, RotateCcw, Undo2 } from "lucide-react";
 import { CalibPanel } from "@/components/calib-panel";
 import { PairCard } from "@/components/pair-card";
 import { SciChart, type ChartLine } from "@/components/sci-chart";
-import { computePair } from "@/lib/compute";
+import { computePair, stableAreaWindow } from "@/lib/compute";
 import { fitOrigin } from "@/lib/fit";
 import { decimate, newId, parseSci } from "@/lib/signal";
 import { guessMolecule, parseQms, parseSpectrum, spectrumOrder, suggestWindow } from "@/lib/parse";
@@ -30,6 +30,32 @@ const SAMPLES = [
   "spectrum5.CSV",
   "spectrum6.CSV",
 ];
+
+function downloadStem(molecule: string): string {
+  const mol = (molecule || "X").trim().replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ") || "X";
+  const d = new Date();
+  const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${mol} ${stamp}`;
+}
+
+function blankPoint(meanI: number, rate: number): CalibPoint {
+  return {
+    id: newId(),
+    manual: true,
+    spectrum: "вручную",
+    meanI,
+    rate,
+    time: 0,
+    sGood: 0,
+    sFull: 0,
+    k: 1,
+    irArea: 0,
+  };
+}
+
+function withIds(points: CalibPoint[]): CalibPoint[] {
+  return points.map((p, i) => ({ ...p, id: p.id || `p${i}-${p.spectrum}` }));
+}
 
 function withFrame(p: Pair): Pair {
   const xs = [p.base1, p.base2, p.span1, p.span2];
@@ -91,8 +117,12 @@ export function CcApp() {
   const [wnMaxText, setWnMaxText] = useState("2500");
   const [band, setBand] = useState<number | null>(null);
   const [bandText, setBandText] = useState("");
+  const [bandNote, setBandNote] = useState("");
   const [share, setShare] = useState(false);
   const [order, setOrder] = useState(1);
+  const [manualPoints, setManualPoints] = useState<CalibPoint[]>([]);
+  const [omitted, setOmitted] = useState<string[]>([]);
+  const [autoNote, setAutoNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [curveOnly, setCurveOnly] = useState<{
@@ -171,6 +201,9 @@ export function CcApp() {
     setMolecule(moleculeName || guessMolecule(next.qms.filename));
     setPairs([]);
     setPending(null);
+    setManualPoints([]);
+    setOmitted([]);
+    setAutoNote(null);
     setCurveOnly(null);
   }
 
@@ -182,6 +215,7 @@ export function CcApp() {
       setBand(project.bandStrength);
       setBandText(project.bandStrength.toExponential(4));
     }
+    setBandNote(project.bandNote ?? "");
     if (project.qms && project.spectra?.length) {
       const spectra = [...project.spectra].sort(spectrumOrder);
       setBundle({ qms: project.qms, spectra });
@@ -192,15 +226,21 @@ export function CcApp() {
       setWnMinText(String(project.wnMin));
       setWnMaxText(String(project.wnMax));
       setPairs(project.pairs ?? []);
+      setManualPoints(withIds(project.manualPoints ?? []));
+      setOmitted(project.omittedPairIds ?? []);
       setPending(null);
+      setAutoNote(null);
       setCurveOnly(null);
       return;
     }
     setBundle(null);
     setPairs([]);
     setPending(null);
+    setManualPoints([]);
+    setOmitted([]);
+    setAutoNote(null);
     setCurveOnly({
-      points: project.points ?? [],
+      points: withIds(project.points ?? []),
       fit: project.polynomial,
       units: project.units || "Торр",
       band: project.bandStrength,
@@ -246,6 +286,9 @@ export function CcApp() {
       }
       setShare(Boolean(project.shareBaseline));
       setOrder(project.polyOrder || 1);
+      setBandNote(project.bandNote ?? "");
+      setManualPoints(withIds(project.manualPoints ?? []));
+      setOmitted(project.omittedPairIds ?? []);
       if (project.bandStrength != null) {
         setBand(project.bandStrength);
         setBandText(project.bandStrength.toExponential(4));
@@ -276,13 +319,23 @@ export function CcApp() {
     setBusy("Открываю пример CO₂…");
     setError(null);
     try {
-      const files = await Promise.all(
-        SAMPLES.map(async (name) => {
-          const res = await fetch(`/samples/${encodeURIComponent(name)}`);
-          if (!res.ok) throw new Error(`Нет файла ${name}`);
-          return { name, text: await res.text() };
-        }),
-      );
+      const embedded =
+        typeof window !== "undefined"
+          ? (window as Window & { __CC_SAMPLES?: Record<string, string> }).__CC_SAMPLES
+          : undefined;
+      const files = embedded
+        ? SAMPLES.map((name) => {
+            const text = embedded[name];
+            if (text == null) throw new Error(`Нет файла ${name}`);
+            return { name, text };
+          })
+        : await Promise.all(
+            SAMPLES.map(async (name) => {
+              const res = await fetch(`/samples/${encodeURIComponent(name)}`);
+              if (!res.ok) throw new Error(`Нет файла ${name}`);
+              return { name, text: await res.text() };
+            }),
+          );
       await ingest(files);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Пример не открылся");
@@ -300,7 +353,7 @@ export function CcApp() {
       if (lower.endsWith(".zip")) {
         const packed = await unzipStore(await file.arrayBuffer());
         const json = packed.find((item) => item.name.toLowerCase().endsWith(".json"));
-        if (!json) throw new Error("В архиве нет calibration.json");
+        if (!json) throw new Error("В архиве нет json с калибровкой");
         restore(JSON.parse(new TextDecoder().decode(json.data)) as ProjectFile);
       } else if (lower.endsWith(".htm") || lower.endsWith(".html")) {
         const text = await file.text();
@@ -309,30 +362,42 @@ export function CcApp() {
         const data = JSON.parse(match[1]) as {
           molecule?: string;
           units?: string;
-          points?: { spectrum: string; meanI: number; rate: number }[];
+          points?: { id?: string; spectrum: string; meanI: number; rate: number; time?: number; k?: number }[];
           coeffs?: number[];
+          order?: number;
           bandStrength?: number | null;
+          bandNote?: string;
         };
         if (data.molecule) setMolecule(data.molecule);
-        const pts: CalibPoint[] = (data.points ?? []).map((p) => ({
+        if (data.order) setOrder(data.order);
+        setBandNote(data.bandNote ?? "");
+        if (data.bandStrength != null) {
+          setBand(data.bandStrength);
+          setBandText(data.bandStrength.toExponential(4));
+        }
+        const pts: CalibPoint[] = (data.points ?? []).map((p, i) => ({
+          id: p.id || `p${i}`,
           spectrum: p.spectrum,
           meanI: p.meanI,
           rate: p.rate,
-          time: 0,
+          time: p.time ?? 0,
           sGood: 0,
           sFull: 0,
-          k: 1,
+          k: p.k ?? 1,
           irArea: 0,
+          manual: p.spectrum === "вручную",
         }));
         const fit = data.coeffs?.length
           ? { order: data.coeffs.length, coeffs: data.coeffs, scale: 1, r2: 1 }
           : fitOrigin(
               pts.map((p) => p.meanI),
               pts.map((p) => p.rate),
-              order,
+              data.order || order,
             );
         setBundle(null);
         setPairs([]);
+        setManualPoints([]);
+        setOmitted([]);
         setCurveOnly({ points: pts, fit, units: data.units || "Торр", band: data.bandStrength ?? null });
       } else {
         restore(JSON.parse(await file.text()) as ProjectFile);
@@ -411,6 +476,8 @@ export function CcApp() {
       const result = computePair(time, signal, bundle.spectra[i], pair, band);
       if (result.rate == null || !Number.isFinite(result.rate)) return;
       livePoints.push({
+        id: pair.id,
+        pairId: pair.id,
         spectrum: pair.spectrum,
         meanI: result.meanI,
         rate: result.rate,
@@ -422,25 +489,75 @@ export function CcApp() {
       });
     });
   }
-  const liveFit = fitOrigin(
-    livePoints.map((p) => p.meanI),
-    livePoints.map((p) => p.rate),
+  const pairPoints = livePoints.filter((p) => !p.pairId || !omitted.includes(p.pairId));
+  const shownPoints = bundle ? [...pairPoints, ...manualPoints] : (curveOnly?.points ?? []);
+  const shownFit = fitOrigin(
+    shownPoints.map((p) => p.meanI),
+    shownPoints.map((p) => p.rate),
     order,
   );
-  const shownPoints = bundle ? livePoints : (curveOnly?.points ?? []);
-  const shownFit = bundle ? liveFit : (curveOnly?.fit ?? null);
   const shownBand = bundle ? band : (curveOnly?.band ?? band);
+
+  function addPoint(meanI: number, rate: number) {
+    const point = blankPoint(meanI, rate);
+    if (bundle) {
+      setManualPoints((xs) => [...xs, point]);
+      return;
+    }
+    setCurveOnly((c) => ({
+      points: [...(c?.points ?? []), point],
+      fit: null,
+      units: c?.units ?? units,
+      band: c?.band ?? band,
+    }));
+  }
+
+  function removePoint(id: string) {
+    if (bundle) {
+      const point = shownPoints.find((p) => p.id === id);
+      if (point?.pairId && !point.manual) {
+        setOmitted((xs) => (xs.includes(point.pairId!) ? xs : [...xs, point.pairId!]));
+      } else {
+        setManualPoints((xs) => xs.filter((p) => p.id !== id));
+      }
+      return;
+    }
+    setCurveOnly((c) => (c ? { ...c, points: c.points.filter((p) => p.id !== id) } : c));
+  }
+
+  function autoRect() {
+    if (!bundle) return;
+    const skipped: string[] = [];
+    setPairs((ps) =>
+      ps.map((p, i) => {
+        if (p.locked) return p;
+        const win = stableAreaWindow(time, signal, p.base1, p.base2, 10);
+        if (!win) {
+          skipped.push(String(i + 1));
+          return p;
+        }
+        return withFrame({ ...p, span1: win.span1, span2: win.span2, tool: "area" });
+      }),
+    );
+    setAutoNote(
+      skipped.length
+        ? `Нет 10 с стабильного тока по краям, пары не изменены: ${skipped.join(", ")}`
+        : "Окна площади стоят на стабильном токе, слева и справа от границ не меньше 10 с.",
+    );
+  }
 
   async function save() {
     setBusy("Сохраняю архив…");
     setError(null);
     try {
+      const stem = downloadStem(molecule);
       const mass = bundle?.qms.channels[channel]?.mass ?? 0;
       const project: ProjectFile = {
         type: "cc-calibration",
         version: PROJECT_VERSION,
         molecule: molecule || "X",
         bandStrength: shownBand,
+        bandNote,
         units,
         channelMass: mass,
         wnMin,
@@ -449,6 +566,8 @@ export function CcApp() {
         polyOrder: order,
         polynomial: shownFit,
         points: shownPoints,
+        manualPoints,
+        omittedPairIds: omitted,
         pairs,
         qms: bundle?.qms,
         spectra: bundle?.spectra,
@@ -460,6 +579,7 @@ export function CcApp() {
         points: shownPoints,
         fit: shownFit,
         bandStrength: shownBand,
+        bandNote,
       });
       const html = calibrationHtml({
         molecule: project.molecule,
@@ -467,14 +587,16 @@ export function CcApp() {
         points: shownPoints,
         fit: shownFit,
         bandStrength: shownBand,
+        bandNote,
+        order,
       });
       const zip = zipStore([
-        { name: "calibration.json", data: enc.encode(JSON.stringify(project)) },
-        { name: "points.csv", data: enc.encode(pointsCsv(shownPoints, units)) },
-        { name: "calibration.html", data: enc.encode(html) },
-        { name: "calibration.png", data: new Uint8Array(await png.arrayBuffer()) },
+        { name: `${stem}.json`, data: enc.encode(JSON.stringify(project)) },
+        { name: `${stem}.csv`, data: enc.encode(pointsCsv(shownPoints, units)) },
+        { name: `${stem}.html`, data: enc.encode(html) },
+        { name: `${stem}.png`, data: new Uint8Array(await png.arrayBuffer()) },
       ]);
-      downloadBlob(zip, `${(molecule || "x").replace(/\s+/g, "_")}-cc.zip`);
+      downloadBlob(zip, `${stem}.zip`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
     } finally {
@@ -500,10 +622,6 @@ export function CcApp() {
             Скорость роста лучевой концентрации от среднего ионного тока. Прямоугольники QMS слева, спектры справа, кривая внизу.
           </p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={save} disabled={Boolean(busy)}>
-          <Save aria-hidden="true" />
-          Сохранить
-        </button>
       </header>
 
       <section className="card setup">
@@ -552,6 +670,14 @@ export function CcApp() {
               }}
             />
           </label>
+          <label className="span-2">
+            Сила полосы: температура, источник
+            <input
+              value={bandNote}
+              placeholder="15 K, источник"
+              onChange={(e) => setBandNote(e.target.value)}
+            />
+          </label>
           <label>
             Ионный ток
             <select
@@ -593,10 +719,6 @@ export function CcApp() {
               }}
             />
           </label>
-          <label className="check share">
-            <input type="checkbox" checked={share} onChange={(e) => toggleShare(e.target.checked)} />
-            Расшарить базовую линию
-          </label>
         </div>
         <p className="hint-inline">
           К двум кликам на каждый спектр — левая и правая граница прямоугольника, по порядку файлов. Колёсико масштабирует ось, Shift+перетаскивание сдвигает её, «1:1» сбрасывает масштаб.
@@ -632,6 +754,8 @@ export function CcApp() {
                 onClick={() => {
                   setPairs([]);
                   setPending(null);
+                  setOmitted([]);
+                  setAutoNote(null);
                 }}
               >
                 <RotateCcw aria-hidden="true" />
@@ -655,6 +779,21 @@ export function CcApp() {
               label: String(i + 1),
             }))}
           />
+        </section>
+      ) : null}
+
+      {bundle ? (
+        <section className="card">
+          <div className="pair-bar">
+            <button type="button" className="btn" onClick={autoRect} disabled={!pairs.some((p) => !p.locked)}>
+              Автопрямоугольник
+            </button>
+            <label className="check">
+              <input type="checkbox" checked={share} onChange={(e) => toggleShare(e.target.checked)} />
+              Расшарить базовую линию
+            </label>
+          </div>
+          {autoNote ? <p className="hint-inline">{autoNote}</p> : null}
         </section>
       ) : null}
 
@@ -685,6 +824,11 @@ export function CcApp() {
         order={order}
         onOrder={setOrder}
         band={shownBand}
+        bandNote={bandNote}
+        onSave={save}
+        busy={Boolean(busy)}
+        onAdd={addPoint}
+        onRemove={removePoint}
       />
     </main>
   );

@@ -357,6 +357,30 @@
     font-family: var(--font-mono);
     font-size: 0.8rem;
   }
+  .pair-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem 1rem;
+  }
+  .band-line {
+    margin: 0.75rem 0 0;
+    font-size: 0.95rem;
+  }
+  .btn-tiny {
+    min-height: 2rem;
+    padding: 0.1rem 0.7rem;
+    font-size: 0.82rem;
+  }
+  .span-2 {
+    grid-column: 1 / -1;
+  }
+  .span-2 input {
+    font-family: var(--font-sans);
+  }
+  .predict > .btn {
+    align-self: end;
+  }
   .status {
     margin: 0;
     color: var(--color-muted);

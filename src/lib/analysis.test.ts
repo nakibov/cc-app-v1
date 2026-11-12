@@ -1,12 +1,34 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { computePair } from "./compute.ts";
+import { computePair, stableAreaWindow } from "./compute.ts";
 import { evalPoly, fitOrigin, invertPoly } from "./fit.ts";
 import { guessMolecule, parseQms, parseSpectrum, suggestWindow } from "./parse.ts";
-import { integrate, meanWindow } from "./signal.ts";
+import { integrate, meanWindow, parseSci } from "./signal.ts";
 import { createSpline } from "./spline.ts";
 import type { Pair } from "./types.ts";
+
+test("parseSci accepts cyrillic ye in the exponent", () => {
+  assert.equal(parseSci("1.6e-17"), 1.6e-17);
+  assert.equal(parseSci("1,6е-17"), 1.6e-17);
+  assert.equal(parseSci("6Е-7"), 6e-7);
+  assert.equal(parseSci("2.5е−3"), 2.5e-3);
+});
+
+test("stable area keeps 10 s of plateau outside the window", () => {
+  const text = fs.readFileSync("/workspace/public/samples/CO2 cc.txt", "utf8");
+  const qms = parseQms("CO2 cc.txt", text);
+  const idx = qms.channels.findIndex((c) => c.mass === 44);
+  const wide = stableAreaWindow(qms.time, qms.signals[idx], 3900, 5600, 10);
+  assert.ok(wide);
+  assert.ok(wide.span1 > 4265 && wide.span1 < 4325, `span1 ${wide.span1}`);
+  assert.ok(wide.span2 > 5425 && wide.span2 < 5465, `span2 ${wide.span2}`);
+  const tight = stableAreaWindow(qms.time, qms.signals[idx], 4400, 5300, 10);
+  assert.ok(tight);
+  assert.ok(Math.abs(tight.span1 - 4410) < 3, `tight1 ${tight.span1}`);
+  assert.ok(Math.abs(tight.span2 - 5290) < 3, `tight2 ${tight.span2}`);
+  assert.equal(stableAreaWindow(qms.time, qms.signals[idx], 100, 118, 10), null);
+});
 
 test("trapezoid of a unit rectangle is the width", () => {
   const x = [0, 1, 2, 3, 4];

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Save } from "lucide-react";
 import { SciChart } from "@/components/sci-chart";
 import { evalPoly, invertPoly, polyLabel } from "@/lib/fit";
 import { fmtExp, parseSci } from "@/lib/signal";
@@ -12,6 +13,11 @@ export function CalibPanel({
   order,
   onOrder,
   band,
+  bandNote,
+  onSave,
+  busy,
+  onAdd,
+  onRemove,
 }: {
   molecule: string;
   units: string;
@@ -20,9 +26,16 @@ export function CalibPanel({
   order: number;
   onOrder: (n: number) => void;
   band: number | null;
+  bandNote: string;
+  onSave: () => void;
+  busy: boolean;
+  onAdd: (meanI: number, rate: number) => void;
+  onRemove: (id: string) => void;
 }) {
   const [currentText, setCurrentText] = useState("");
   const [rateText, setRateText] = useState("");
+  const [addI, setAddI] = useState("");
+  const [addV, setAddV] = useState("");
   const [hint, setHint] = useState("");
 
   const curve = useMemo(() => {
@@ -87,19 +100,37 @@ export function CalibPanel({
     setHint("");
   }
 
+  function addPoint() {
+    const x = parseSci(addI);
+    const y = parseSci(addV);
+    if (x == null || y == null) {
+      setHint("Для новой точки нужны ток и скорость");
+      return;
+    }
+    onAdd(x, y);
+    setAddI("");
+    setAddV("");
+    setHint("");
+  }
+
+  const bandValue = band != null && Number.isFinite(band) ? fmtExp(band) : "—";
+  const bandLine = bandNote.trim() ? `сила полосы: ${bandValue}, ${bandNote.trim()}` : `сила полосы: ${bandValue}`;
+
   return (
     <section className="card calib" id="calib">
       <header className="pair-head">
         <div>
           <p className="eyebrow">Калибровка</p>
-          <h2>
-            {molecule || "X"} cc
-          </h2>
+          <h2>{molecule || "X"} cc</h2>
+          <p className="formula">
+            v = A · ln(10) · k / (Δt · S)
+            {band != null ? ` · S = ${fmtExp(band)}` : ""}
+          </p>
         </div>
-        <p className="formula">
-          v = A · ln(10) · k / (Δt · S)
-          {band != null ? ` · S = ${fmtExp(band)}` : ""}
-        </p>
+        <button type="button" className="btn btn-primary" onClick={onSave} disabled={busy}>
+          <Save aria-hidden="true" />
+          Сохранить кк
+        </button>
       </header>
 
       {points.length === 0 ? (
@@ -117,6 +148,8 @@ export function CalibPanel({
           resetToken={points.length}
         />
       )}
+
+      <p className="band-line">{bandLine}</p>
 
       <fieldset className="orders">
         <legend>Порядок полинома</legend>
@@ -166,34 +199,67 @@ export function CalibPanel({
       </div>
       {hint ? <p className="warn">{hint}</p> : null}
 
-      {points.length ? (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>спектр</th>
-                <th>⟨I⟩</th>
-                <th>скорость</th>
-                <th>Δt, с</th>
-                <th>k</th>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>спектр</th>
+              <th>⟨I⟩</th>
+              <th>скорость</th>
+              <th>Δt, с</th>
+              <th>k</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {points.map((p, i) => (
+              <tr key={p.id || p.spectrum + i}>
+                <td>{i + 1}</td>
+                <td>{p.spectrum}</td>
+                <td>{fmtExp(p.meanI)}</td>
+                <td>{fmtExp(p.rate)}</td>
+                <td>{p.manual || !p.time ? "—" : fmtExp(p.time, 3)}</td>
+                <td>{p.manual ? "—" : fmtExp(p.k, 3)}</td>
+                <td>
+                  <button type="button" className="btn btn-quiet btn-tiny" onClick={() => onRemove(p.id || String(i))}>
+                    Убрать
+                  </button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {points.map((p, i) => (
-                <tr key={p.spectrum + i}>
-                  <td>{i + 1}</td>
-                  <td>{p.spectrum}</td>
-                  <td>{fmtExp(p.meanI)}</td>
-                  <td>{fmtExp(p.rate)}</td>
-                  <td>{fmtExp(p.time, 3)}</td>
-                  <td>{fmtExp(p.k, 3)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="predict">
+        <label>
+          Новая точка, ток
+          <input
+            value={addI}
+            placeholder="6e-7"
+            inputMode="decimal"
+            onChange={(e) => setAddI(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") addPoint();
+            }}
+          />
+        </label>
+        <label>
+          Новая точка, скорость
+          <input
+            value={addV}
+            placeholder="скорость"
+            inputMode="decimal"
+            onChange={(e) => setAddV(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") addPoint();
+            }}
+          />
+        </label>
+        <button type="button" className="btn" onClick={addPoint}>
+          Добавить
+        </button>
+      </div>
     </section>
   );
 }
