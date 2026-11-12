@@ -517,12 +517,8 @@ export function SciChart({
         >
           {yLabel}
         </text>
-        {readout ? (
-          <text x={M.l + plotW - 4} y={M.t + 14} textAnchor="end" className="tick">
-            {readout}
-          </text>
-        ) : null}
       </svg>
+      {readout ? <div className="plot-readout">{readout}</div> : null}
       <button
         type="button"
         className="plot-reset"

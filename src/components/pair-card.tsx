@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Magnet } from "lucide-react";
 import { SciChart, type ChartLine } from "@/components/sci-chart";
 import { baselineLine, computePair, irBaseline } from "@/lib/compute";
-import { decimate, fmtExp, lowerBound, meanWindow, newId, parseSci } from "@/lib/signal";
+import { decimate, fmtExp, fmtSig, fmtT, lowerBound, meanWindow, newId, parseSci } from "@/lib/signal";
 import { splineSamples } from "@/lib/spline";
 import type { Pair, Spectrum } from "@/lib/types";
 
@@ -134,7 +134,7 @@ export function PairCard({
               onChange={setTool}
             />
             <Segment
-              label="Доля дозы"
+              label="Отношение площадей (k)"
               value={pair.fullMode}
               disabled={disabled}
               options={[
@@ -289,13 +289,13 @@ export function PairCard({
       </div>
 
       <dl className="stats">
-        <Stat label="Δt, с" value={fmtExp(result.time, 4)} />
+        <Stat label="Δt, с" value={fmtT(result.time)} />
         <Stat label={`⟨I⟩, ${units}`} value={fmtExp(result.meanI)} />
         <Stat label="S_good" value={fmtExp(result.sGood)} />
         <Stat label="S_full" value={fmtExp(result.sFull)} />
-        <Stat label="k = S_good/S_full" value={fmtExp(result.k, 4)} />
-        <Stat label="A, см⁻¹" value={fmtExp(result.irArea)} />
-        <Stat label="A·ln(10)" value={fmtExp(result.optical)} />
+        <Stat label="k = S_good/S_full" value={fmtSig(result.k)} />
+        <Stat label="S_IR" value={fmtSig(result.irArea)} />
+        <Stat label="S_IR·ln(10)" value={fmtExp(result.optical)} />
         <Stat label="скорость" value={result.rate == null ? "—" : fmtExp(result.rate)} />
       </dl>
       {result.warnings.length ? <p className="warn">{result.warnings.join(" · ")}</p> : null}

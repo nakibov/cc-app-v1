@@ -133,8 +133,24 @@ export function fmtTick(v: number): string {
   if (a !== 0 && (a < 0.01 || a >= 10000)) {
     return v.toExponential(1).replace("e+", "e");
   }
-  const digits = a >= 100 ? 0 : a >= 10 ? 1 : a >= 1 ? 2 : 3;
-  return v.toFixed(digits).replace(/\.?0+$/, "");
+  if (a >= 100) return String(Math.round(v));
+  const digits = a >= 10 ? 1 : a >= 1 ? 2 : 3;
+  return v.toFixed(digits).replace(/\.0+$/, "").replace(/\.$/, "");
+}
+
+/** Three significant digits, decimal (no trailing zeros stripped from integer part). */
+export function fmtSig(v: number, sig = 3): string {
+  if (!Number.isFinite(v)) return "—";
+  if (v === 0) return "0";
+  const s = v.toPrecision(sig);
+  if (s.includes("e") || s.includes("E")) return s;
+  return s.replace(/\.0+$/, "").replace(/\.$/, "");
+}
+
+/** One digit after decimal. */
+export function fmtT(v: number): string {
+  if (!Number.isFinite(v)) return "—";
+  return v.toFixed(1);
 }
 
 export function fmtExp(v: number, digits = 3): string {

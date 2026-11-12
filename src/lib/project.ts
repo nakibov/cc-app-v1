@@ -291,6 +291,7 @@ export function calibrationHtml(opts: {
   fit: Fit | null;
   bandStrength: number | null;
   bandNote?: string;
+  bandText?: string;
   order?: number;
 }): string {
   const payload = {
@@ -303,11 +304,13 @@ export function calibrationHtml(opts: {
       rate: p.rate,
       time: p.time,
       k: p.k,
+      irArea: p.irArea,
     })),
     order: opts.order || opts.fit?.order || 1,
     coeffs: opts.fit?.coeffs ?? [],
     bandStrength: opts.bandStrength,
     bandNote: opts.bandNote ?? "",
+    bandText: opts.bandText || (opts.bandStrength != null ? String(opts.bandStrength) : ""),
   };
   const json = JSON.stringify(payload).replace(/</g, "\\u003c");
   const molecule = escHtml(opts.molecule || "X");
@@ -317,7 +320,7 @@ export function calibrationHtml(opts: {
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>${molecule} cc</title>
+<title>cc app — ${molecule}</title>
 <style>
   :root { color-scheme: light; }
   body { margin: 0; font-family: "IBM Plex Sans", "Segoe UI", sans-serif; background: #e6ecee; color: #1b2428; }
@@ -343,8 +346,8 @@ export function calibrationHtml(opts: {
 </head>
 <body>
 <main>
-  <h1>${molecule} cc</h1>
-  <p class="sub">Калибровочная кривая. Колёсико меняет масштаб, двойной щелчок сбрасывает его. Точки можно добавить и убрать — полином перестроится.</p>
+  <h1>cc app</h1>
+  <p class="sub">Калибровочная кривая. Колёсико меняет масштаб, двойной щелчок сбрасывает его. Точки можно добавить и убрать — полином перестроится. <span id="bandUsed"></span></p>
   <canvas id="c" width="1200" height="720"></canvas>
   <p class="eq" id="eq"></p>
   <div class="row">
@@ -354,7 +357,7 @@ export function calibrationHtml(opts: {
   <p class="hint" id="hint"></p>
   <div class="wrap">
     <table>
-      <thead><tr><th>#</th><th>спектр</th><th>⟨I⟩</th><th>скорость</th><th>Δt, с</th><th>k</th><th></th></tr></thead>
+      <thead><tr><th>#</th><th>спектр</th><th>⟨I⟩</th><th>скорость</th><th>Δt, с</th><th>k</th><th>S_IR</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -363,7 +366,15 @@ export function calibrationHtml(opts: {
     <label>Новая точка, скорость<input id="addV" placeholder="скорость" inputmode="decimal"/></label>
     <button type="button" class="primary" id="add">Добавить</button>
   </div>
-  <p class="band" id="band"></p>
+  <div class="band-edit" style="margin-top:18px">
+    <button type="button" id="editBand">Изменить силу полосы</button>
+    <div id="bandForm" style="display:none; margin-top:8px">
+      <label>Сила полосы A <input id="bandInput" /></label>
+      <button type="button" id="saveBand">Сохранить</button>
+      <button type="button" id="resetBand">Сбросить</button>
+      <p class="hint" id="bandHint">Изменения не сохранены</p>
+    </div>
+  </div>
 </main>
 <script id="cc-data" type="application/json">${json}</script>
 <script>
@@ -376,7 +387,6 @@ const hint = document.getElementById("hint");
 const iEl = document.getElementById("i");
 const vEl = document.getElementById("v");
 const rows = document.getElementById("rows");
-const bandEl = document.getElementById("band");
 function solve(A, b) {
   const n = b.length;
   const M = A.map((row, i) => row.concat([b[i]]));
@@ -462,14 +472,14 @@ function home() {
   const xs = [0, ...data.points.map((p) => p.meanI)];
   const ys = [0, ...data.points.map((p) => p.rate)];
   let x1 = Math.max(...xs, 1e-30) * 1.12;
-  let y0 = Math.min(...ys, 0), y1 = Math.max(...ys, 0);
+  let y1 = Math.max(...ys, 0);
   const coeffs = data.coeffs || [];
   if (coeffs.length) {
-    for (let i = 0; i <= 60; i++) { const y = ev(x1 * i / 60); if (y > y1) y1 = y; if (y < y0) y0 = y; }
+    for (let i = 0; i <= 60; i++) { const y = ev(x1 * i / 60); if (y > y1) y1 = y; }
   }
-  if (y1 === y0) { y1 += 1; y0 -= 1; }
-  const pad = (y1 - y0) * 0.12;
-  return { x0: 0, x1, y0: y0 - pad, y1: y1 + pad };
+  if (y1 <= 0) y1 = 1;
+  const pad = y1 * 0.12;
+  return { x0: 0, x1, y0: 0, y1: y1 + pad };
 }
 function fmt(v) {
   if (!Number.isFinite(v)) return "—";
@@ -518,19 +528,29 @@ function draw() {
   ctx.beginPath(); ctx.fillStyle = "#0f5f5c"; ctx.arc(X(0), Y(0), 5, 0, 6.3); ctx.fill();
   ctx.fillStyle = "#5c6c73"; ctx.textAlign = "center";
   ctx.fillText("средний ионный ток, " + (data.units || ""), m.l + pw / 2, H - 16);
+  ctx.save();
+  ctx.translate(18, m.t + ph / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = "center";
+  ctx.fillText("скорость", 0, 0);
+  ctx.restore();
 }
 function refreshText() {
   const coeffs = data.coeffs || [];
   const parts = coeffs.map((a, i) => a.toExponential(3) + (i === 0 ? "·I" : "·I^" + (i + 1)));
   eq.textContent = coeffs.length ? ("v = " + parts.join(" + ")) : "Нет полинома";
-  const s = data.bandStrength;
-  const val = s == null || !Number.isFinite(Number(s)) ? "—" : Number(s).toExponential(3);
+  const raw = String(data.bandText || data.bandStrength || "").trim();
   const note = String(data.bandNote || "").trim();
-  bandEl.textContent = note ? ("сила полосы: " + val + ", " + note) : ("сила полосы: " + val);
+  const used = raw ? ("Использована следующая сила полосы: " + raw + (note ? ", " + note : "")) : "";
+  const bandUsed = document.getElementById("bandUsed");
+  if (bandUsed) bandUsed.textContent = used;
   rows.innerHTML = "";
   data.points.forEach((p, i) => {
     const tr = document.createElement("tr");
-    const cells = [String(i + 1), p.spectrum || "", fmt(p.meanI), fmt(p.rate), Number.isFinite(p.time) && p.time ? fmt(p.time) : "—", Number.isFinite(p.k) ? fmt(p.k) : "—"];
+    const tStr = Number.isFinite(p.time) && p.time ? p.time.toFixed(1) : "—";
+    const kStr = Number.isFinite(p.k) ? Number(p.k).toPrecision(3).replace(/\.0+$/, "") : "—";
+    const sStr = Number.isFinite(p.irArea) ? Number(p.irArea).toPrecision(3).replace(/\.0+$/, "") : "—";
+    const cells = [String(i + 1), p.spectrum || "", fmt(p.meanI), fmt(p.rate), tStr, kStr, sStr];
     cells.forEach((text) => {
       const td = document.createElement("td");
       td.textContent = text;
@@ -599,6 +619,39 @@ canvas.addEventListener("wheel", (e) => {
   draw();
 }, { passive: false });
 canvas.addEventListener("dblclick", () => { view = null; draw(); });
+const editBand = document.getElementById("editBand");
+const bandForm = document.getElementById("bandForm");
+const bandInput = document.getElementById("bandInput");
+const saveBand = document.getElementById("saveBand");
+const resetBand = document.getElementById("resetBand");
+const bandHint = document.getElementById("bandHint");
+if (editBand) editBand.addEventListener("click", () => {
+  bandForm.style.display = "block";
+  bandInput.value = data.bandText || "";
+  bandHint.style.display = "block";
+});
+if (saveBand) saveBand.addEventListener("click", () => {
+  const raw = bandInput.value.trim();
+  const v = parse(raw);
+  data.bandText = raw;
+  data.bandStrength = v;
+  // Recompute rates for non-manual points if possible
+  if (v && v !== 0) {
+    data.points.forEach((p) => {
+      if (p.irArea && p.time && p.k && p.spectrum !== "вручную") {
+        p.rate = (p.irArea * Math.LN10 * p.k) / (p.time * v);
+      }
+    });
+  }
+  fitOrigin(data.order || 1);
+  view = null;
+  bandForm.style.display = "none";
+  refreshText();
+  draw();
+});
+if (resetBand) resetBand.addEventListener("click", () => {
+  bandForm.style.display = "none";
+});
 refreshText();
 draw();
 </script>

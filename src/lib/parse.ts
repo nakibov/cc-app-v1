@@ -32,15 +32,25 @@ export function parseSpectrum(filename: string, text: string): Spectrum {
 function parseNums(line: string): number[] | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
-  let parts: string[];
-  if (trimmed.includes(";")) {
-    parts = trimmed.split(";").map((s) => s.trim().replace(",", "."));
-  } else {
-    parts = trimmed
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+  // Support both legacy all-comma and new "time, rest-whitespace" RGA formats.
+  if (trimmed.includes(",") || trimmed.includes(";")) {
+    const sep = trimmed.includes(";") ? ";" : ",";
+    const parts = trimmed.split(sep).map((s) => s.trim()).filter((s) => s.length > 0);
+    if (parts.length >= 2) {
+      // New format: "0.000,   1.23e-9  4.56e-12 ..." — only one comma, rest space/tab separated.
+      if (parts.length === 2 && /\s/.test(parts[1])) {
+        const rest = parts[1].split(/\s+/).filter(Boolean);
+        const all = [parts[0], ...rest];
+        const nums = all.map(Number);
+        if (nums.length >= 2 && nums.every((n) => Number.isFinite(n))) return nums;
+      } else {
+        const nums = parts.map(Number);
+        if (nums.length >= 2 && nums.every((n) => Number.isFinite(n))) return nums;
+      }
+    }
   }
+  // Fallback: pure whitespace-separated.
+  const parts = trimmed.split(/\s+/).filter(Boolean);
   if (parts.length < 2) return null;
   const nums = parts.map(Number);
   if (nums.some((n) => !Number.isFinite(n))) return null;

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Save } from "lucide-react";
 import { SciChart } from "@/components/sci-chart";
 import { evalPoly, invertPoly, polyLabel } from "@/lib/fit";
-import { fmtExp, parseSci } from "@/lib/signal";
+import { fmtExp, fmtSig, fmtT, parseSci } from "@/lib/signal";
 import type { CalibPoint, Fit } from "@/lib/types";
 
 export function CalibPanel({
@@ -14,10 +14,12 @@ export function CalibPanel({
   onOrder,
   band,
   bandNote,
+  bandText,
   onSave,
   busy,
   onAdd,
-  onRemove,
+  onToggle,
+  offIds,
 }: {
   molecule: string;
   units: string;
@@ -27,10 +29,12 @@ export function CalibPanel({
   onOrder: (n: number) => void;
   band: number | null;
   bandNote: string;
+  bandText: string;
   onSave: () => void;
   busy: boolean;
   onAdd: (meanI: number, rate: number) => void;
-  onRemove: (id: string) => void;
+  onToggle: (id: string) => void;
+  offIds: string[];
 }) {
   const [currentText, setCurrentText] = useState("");
   const [rateText, setRateText] = useState("");
@@ -123,8 +127,8 @@ export function CalibPanel({
           <p className="eyebrow">Калибровка</p>
           <h2>{molecule || "X"} cc</h2>
           <p className="formula">
-            v = A · ln(10) · k / (Δt · S)
-            {band != null ? ` · S = ${fmtExp(band)}` : ""}
+            v = S_IR · ln(10) · k / (Δt · A)
+            {band != null ? ` · A = ${bandText || fmtExp(band)}` : ""}
           </p>
         </div>
         <button type="button" className="btn btn-primary" onClick={onSave} disabled={busy}>
@@ -135,7 +139,7 @@ export function CalibPanel({
 
       {points.length === 0 ? (
         <p className="empty-note">
-          Точки появятся, когда для каждой пары заданы окно площади и сила полосы. На график добавляется (0, 0), свободный член полинома равен нулю.
+          Точки появятся, когда для каждой пары заданы окно площади и сила полосы. На график добавляется (0, 0), свободный член полинома равен нулю, k&lt;1 — отношение площадей, поправка на то, что прямоугольник для подсчёта ⟨I⟩ меньше полной площади.
         </p>
       ) : (
         <SciChart
@@ -209,25 +213,37 @@ export function CalibPanel({
               <th>скорость</th>
               <th>Δt, с</th>
               <th>k</th>
-              <th />
+              <th>S_IR</th>
+              <th>выключить</th>
             </tr>
           </thead>
           <tbody>
-            {points.map((p, i) => (
-              <tr key={p.id || p.spectrum + i}>
+            {points.map((p, i) => {
+              const off = p.id ? offIds.includes(p.id) : false;
+              return (
+              <tr key={p.id || p.spectrum + i} style={off ? { opacity: 0.45 } : undefined}>
                 <td>{i + 1}</td>
                 <td>{p.spectrum}</td>
                 <td>{fmtExp(p.meanI)}</td>
                 <td>{fmtExp(p.rate)}</td>
-                <td>{p.manual || !p.time ? "—" : fmtExp(p.time, 3)}</td>
-                <td>{p.manual ? "—" : fmtExp(p.k, 3)}</td>
+                <td>{p.manual || !p.time ? "—" : fmtT(p.time)}</td>
+                <td>{p.manual ? "—" : fmtSig(p.k)}</td>
+                <td>{p.manual ? "—" : fmtSig(p.irArea)}</td>
                 <td>
-                  <button type="button" className="btn btn-quiet btn-tiny" onClick={() => onRemove(p.id || String(i))}>
-                    Убрать
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={off}
+                    className={off ? "switch on" : "switch"}
+                    onClick={() => onToggle(p.id || String(i))}
+                    title="Выключить точку"
+                  >
+                    <i />
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

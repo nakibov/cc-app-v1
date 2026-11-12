@@ -31,8 +31,8 @@ const SAMPLES = [
   "spectrum6.CSV",
 ];
 
-function downloadStem(molecule: string): string {
-  const mol = (molecule || "X").trim().replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ") || "X";
+function downloadStem(molecule: string, fallback = "X"): string {
+  const mol = (molecule || fallback).trim().replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ") || fallback;
   const d = new Date();
   const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   return `${mol} ${stamp}`;
@@ -471,7 +471,8 @@ export function CcApp() {
   }
 
   const livePoints: CalibPoint[] = [];
-  if (bundle) {
+  const bandReady = band != null && band !== 0 && bandNote.trim().length > 0;
+  if (bundle && bandReady) {
     pairs.forEach((pair, i) => {
       const result = computePair(time, signal, bundle.spectra[i], pair, band);
       if (result.rate == null || !Number.isFinite(result.rate)) return;
@@ -489,11 +490,12 @@ export function CcApp() {
       });
     });
   }
-  const pairPoints = livePoints.filter((p) => !p.pairId || !omitted.includes(p.pairId));
-  const shownPoints = bundle ? [...pairPoints, ...manualPoints] : (curveOnly?.points ?? []);
+  const allPoints = bundle ? [...livePoints, ...manualPoints] : (curveOnly?.points ?? []);
+  const enabledPoints = allPoints.filter((p) => !p.id || !omitted.includes(p.id));
+  const shownPoints = enabledPoints; // for fit and save
   const shownFit = fitOrigin(
-    shownPoints.map((p) => p.meanI),
-    shownPoints.map((p) => p.rate),
+    enabledPoints.map((p) => p.meanI),
+    enabledPoints.map((p) => p.rate),
     order,
   );
   const shownBand = bundle ? band : (curveOnly?.band ?? band);
@@ -512,16 +514,12 @@ export function CcApp() {
     }));
   }
 
-  function removePoint(id: string) {
+  function toggleOff(id: string) {
     if (bundle) {
-      const point = shownPoints.find((p) => p.id === id);
-      if (point?.pairId && !point.manual) {
-        setOmitted((xs) => (xs.includes(point.pairId!) ? xs : [...xs, point.pairId!]));
-      } else {
-        setManualPoints((xs) => xs.filter((p) => p.id !== id));
-      }
+      setOmitted((xs) => (xs.includes(id) ? xs.filter((x) => x !== id) : [...xs, id]));
       return;
     }
+    // curve-only: treat as permanent remove for simplicity, or toggle via filter
     setCurveOnly((c) => (c ? { ...c, points: c.points.filter((p) => p.id !== id) } : c));
   }
 
@@ -547,15 +545,19 @@ export function CcApp() {
   }
 
   async function save() {
+    if (bundle && (band == null || band === 0 || !bandNote.trim())) {
+      setError("Заполните силу полосы A и источник (температура, источник)");
+      return;
+    }
     setBusy("Сохраняю архив…");
     setError(null);
     try {
-      const stem = downloadStem(molecule);
+      const stem = downloadStem(molecule, bundle ? guessMolecule(bundle.qms.filename) : "X");
       const mass = bundle?.qms.channels[channel]?.mass ?? 0;
       const project: ProjectFile = {
         type: "cc-calibration",
         version: PROJECT_VERSION,
-        molecule: molecule || "X",
+        molecule: molecule || (bundle ? guessMolecule(bundle.qms.filename) : "X"),
         bandStrength: shownBand,
         bandNote,
         units,
@@ -588,6 +590,7 @@ export function CcApp() {
         fit: shownFit,
         bandStrength: shownBand,
         bandNote,
+        bandText,
         order,
       });
       const zip = zipStore([
@@ -617,7 +620,7 @@ export function CcApp() {
       <header className="top">
         <div>
           <p className="eyebrow">ИК · масс-спектрометрия</p>
-          <h1>{molecule || "X"} cc</h1>
+          <h1>cc app</h1>
           <p className="lede">
             Скорость роста лучевой концентрации от среднего ионного тока. Прямоугольники QMS слева, спектры справа, кривая внизу.
           </p>
@@ -658,7 +661,7 @@ export function CcApp() {
             <input value={molecule} onChange={(e) => setMolecule(e.target.value)} />
           </label>
           <label>
-            Сила полосы S
+            Сила полосы A, cm molecule⁻¹
             <input
               value={bandText}
               placeholder="1.6e-17"
@@ -694,19 +697,6 @@ export function CcApp() {
             </select>
           </label>
           <label>
-            ν min, см⁻¹
-            <input
-              value={wnMinText}
-              inputMode="decimal"
-              onChange={(e) => setWnMinText(e.target.value)}
-              onBlur={() => {
-                const v = parseSci(wnMinText);
-                if (v == null) setWnMinText(String(wnMin));
-                else setWnMin(v);
-              }}
-            />
-          </label>
-          <label>
             ν max, см⁻¹
             <input
               value={wnMaxText}
@@ -719,6 +709,20 @@ export function CcApp() {
               }}
             />
           </label>
+          <label>
+            ν min, см⁻¹
+            <input
+              value={wnMinText}
+              inputMode="decimal"
+              onChange={(e) => setWnMinText(e.target.value)}
+              onBlur={() => {
+                const v = parseSci(wnMinText);
+                if (v == null) setWnMinText(String(wnMin));
+                else setWnMin(v);
+              }}
+            />
+          </label>
+          
         </div>
         <p className="hint-inline">
           К двум кликам на каждый спектр — левая и правая граница прямоугольника, по порядку файлов. Колёсико масштабирует ось, Shift+перетаскивание сдвигает её, «1:1» сбрасывает масштаб.
@@ -790,7 +794,7 @@ export function CcApp() {
             </button>
             <label className="check">
               <input type="checkbox" checked={share} onChange={(e) => toggleShare(e.target.checked)} />
-              Расшарить базовую линию
+              Расшарить границы интегрирования ИК
             </label>
           </div>
           {autoNote ? <p className="hint-inline">{autoNote}</p> : null}
@@ -817,18 +821,20 @@ export function CcApp() {
         : null}
 
       <CalibPanel
-        molecule={molecule}
+        molecule={molecule || (bundle ? guessMolecule(bundle.qms.filename) : "X")}
         units={units}
-        points={shownPoints}
+        points={allPoints}
         fit={shownFit}
         order={order}
         onOrder={setOrder}
         band={shownBand}
         bandNote={bandNote}
+        bandText={bandText}
         onSave={save}
         busy={Boolean(busy)}
         onAdd={addPoint}
-        onRemove={removePoint}
+        onToggle={toggleOff}
+        offIds={omitted}
       />
     </main>
   );
